@@ -1,8 +1,7 @@
 State of this guide
 
 * Basic outline is in place
-* Algorithms need to be tweaked to make later additions easier
-* Multi-column join is not yet tested
+* Multi-column join needs cleaning up
 
 # Make you a database
 
@@ -44,55 +43,44 @@ LEAST = -1000
 GREATEST 1000
 ```
 
-Each table will be represented as an array of tuples:
+Each table has only one column, so is just an array of integers:
 
 ``` python
-foo = [(0, 0, 0), (0, 13, 1), (5, 6, 2)]
+foo = [0, 13, 6]
 ```
-
-For now we will assume that every tuple is unique. Later on we will worry about how to enforce that.
 
 The tables have the following API:
 
 ``` python
-def sort(table, column):
-# sorts the table by the specified column
+def sort(table):
+# sorts the table in numerical order - beware of eg javascript which defaults to alphabetical order
 
-sort(foo, column=1)
-# => [(0,0,0), (5,6,2), (0,13,1)]
+sort(foo)
+# => [0, 6, 13]
 
-def next(table, column, value, inclusive):
-# if inclusive=True, find the first row in the table which has row[column] >= value
-# if inclusive=False, find the first row in the table which has row[column] > value
+def search(table, value):
+# return true if there is a row in the table with that value
+
+search(foo, 6)
+# => True
+
+search(foo, 7)
+# => False
+
+def next(table, value):
+# find the first row in the table which is > value
 # if there is such a row, returns the row
-# otherwise, returns GREATEST for each column
+# otherwise, returns GREATEST
 # only has to work on sorted tables (so you can use binary search if you want)
 
-next(foo, column=1, value=0, inclusive=True)
-# => (0,0,0)
+next(foo, column=1, value=0)
+# => 6
 
-next(foo, column=1, value=0, inclusive=false)
-# => (5,6,2)
+next(foo, column=1, value=9)
+# => 13
 
-next(foo, column=1, value=9, inclusive=True)
-# => (0,13,1)
-
-next(foo, column=1, value=9, inclusive=false)
-# => (0,13,1)
-
-next(foo, column=1, value=13, inclusive=True)
-# => (0,13,1)
-
-next(foo, column=1, value=13, inclusive=false)
-# => (GREATEST, GREATEST, GREATEST)
-```
-
-Be careful with the sorting, in some languages the default comparison may not do what you expect eg in javascript:
-
-``` js
-x = [3,200,10]
-x.sort()
-// => [10, 200, 3]
+next(foo, column=1, value=13)
+# => GREATEST
 ```
 
 ## Single-column join
@@ -100,14 +88,10 @@ x.sort()
 We have some number of tables which we want to join together:
 
 ``` python
-join({'foo': [(0, 0, 0), (0, 13, 1), (5, 6, 2)]
-      'bar': [(6,), (13,), (7,), (0,), (11,), (23,)]
-      'quux': [(109, 109), (101, 6), (102, 7), (103, 13)]},
-     [('foo', 1), ('bar', 0), ('quux', 1)])
-# join foo, bar, quux where foo[1] = bar[0] = quux[1]
-# => [(5, 6, 2, 6, 101, 6), (0, 13, 1, 13, 103, 13)]
-# notice that we just mash the rows together in the output
-# we will handle 'select' later on
+join([[0, 13, 6]
+      [6, 13, 7, 0, 11, 23]
+      [109, 6, 7, 13]])
+# => [6, 13]
 ```
 
 There are plenty of obvious ways to do this. We are going to use a algorithm that may seem needlessly complicated now, but we will be able to extend it into a full relational query engine.
@@ -115,52 +99,33 @@ There are plenty of obvious ways to do this. We are going to use a algorithm tha
 We start off with a hopelessly naive algorithm that checks every possible value:
 
 ``` python
-value = LEAST
-while True:
-  if (hasValue(foo, column=1, value) and hasValue(bar, column=0, value) and hasValue(quux, column=1, value)):
-    results.append(value)
-  if (value == GREATEST):
-    break
-  value += 1
-# => [6, 13]
+def join(tables):
+  results = []
+  value = LEAST
+  while True:
+    if all([search(table, value) for table in tables]):
+      results.append(value)
+    value += 1
+    if (value == GREATEST):
+      break
+  return results
 ```
 
 But we don't actually have to check all the possible values one by one. We can use the `next` function we wrote earlier to see how far we can skip ahead:
 
 ``` python
-sort(foo, column=1)
-sort(bar, column=0)
-sort(quux, column=1)
-value = LEAST
-results = []
-while True:
-  fooRow = next(foo, column=1, value, inclusive=True)
-  barRow = next(bar, column=0, value, inclusive=True)
-  quuxRow = next(quux, column=1, value, inclusive=True)
-  if (fooRow[1] === GREATEST) or (barRow[0] === GREATEST) or (quuxRow[1] === GREATEST):
-    # no more solutions - one of our tables ran out
-  	break
-  value = max(fooRow[1], barRow[0], quuxRow[1])
-  if (fooRow[1] == barRow[0] == quuxRow[1]):
-    # we found a solution!
-    results.append(fooRow + barRow + quuxRow)
-    # skip to the next value - note inclusive=False
-    fooRow = next(foo, column=1, value, inclusive=False)
-    barRow = next(bar, column=0, value, inclusive=False)
-    quuxRow = next(quux, column=1, value, inclusive=False)
-    value = max(fooRow[1], barRow[0], quuxRow[1])
-    if (fooRow[1] === GREATEST) or (barRow[0] === GREATEST) or (quuxRow[1] === GREATEST):
-      # no more solutions - one of our tables ran out
-  	  break
-```
-
-All you have to do now is make this work for arbitrary inputs like the one shown earlier:
-
-``` python
-join({'foo': [(0, 0, 0), (0, 13, 1), (5, 6, 2)]
-      'bar': [(6,), (13,), (7,), (0,), (11,), (23,)]
-      'quux': [(109, 109), (101, 6), (102, 7), (103, 13)]},
-     [('foo', 1), ('bar', 0), ('quux', 1)])
+def join(tables):
+  results = []
+  for table in tables:
+    sort(table)
+  value = LEAST
+  while True:
+    if all([search(table, value) for table in tables]):
+      results.append(value)
+    value = max([next(table, value) for table in tables])
+    if (value == GREATEST):
+      break
+  return results
 ```
 
 Later on, when we start handling multiple columns, the number of possible combinations we have to look at will explode and this algorithm will let us skip past huge chunks. Even later on, we will build indexes that keep their contents in sorted order so we don't have to call `sort` for every join.
