@@ -69,22 +69,22 @@ def next(table, value, inclusive):
 # otherwise, returns GREATEST
 # only has to work on sorted tables (so you can use binary search if you want)
 
-next(foo, column=1, value=0, inclusive=True)
+next(foo, value=0, inclusive=True)
 # => 0
 
-next(foo, column=1, value=0, inclusive=False)
+next(foo, value=0, inclusive=False)
 # => 6
 
-next(foo, column=1, value=9, inclusive=True)
+next(foo, value=9, inclusive=True)
 # => 13
 
-next(foo, column=1, value=9, inclusive=False)
+next(foo, value=9, inclusive=False)
 # => 13
 
-next(foo, column=1, value=13, inclusive=True)
+next(foo, value=13, inclusive=True)
 # => 13
 
-next(foo, column=1, value=13, inclusive=False)
+next(foo, value=13, inclusive=False)
 # => GREATEST
 ```
 
