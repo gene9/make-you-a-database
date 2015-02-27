@@ -315,7 +315,7 @@ remap(nextRow=("b@b", 1), variables=(0, 0, "b@b"), mapping=[2,0])
 # => (0, 0, "b@b") -- we can't skip anything at all because we don't know if there is a ("a@a", 1) in the table
 ```
 
-To make this simpler we will only allow mappings where all the variable numbers are ascending (ie mapping=(0,2) is ok but mapping=(2,0) is forbidden). Then the rule is:
+To make this simpler we will only allow mappings where all the variable numbers are ascending (ie `mapping=(0,2)` is ok but `mapping=(2,0)` is forbidden). Then the rule is:
 
 * Find the first difference between variables and nextRow
 * Set the corresponding variable to the value from nextRow
