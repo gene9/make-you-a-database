@@ -1,6 +1,7 @@
 TODO
 
 * Change unmap/remap to sensible names
+* Add a proof for the join algorithm
 * Make a reference implementation
 * Query language section
 * Talk about relationship between variable ordering, selectivity, skew etc
