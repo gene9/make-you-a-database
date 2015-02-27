@@ -62,28 +62,29 @@ def sort(table):
 sort(foo)
 # => [0, 6, 13]
 
-def contains(table, value):
-# return true if there is a row in the table with that value
-
-contains(foo, 6)
-# => True
-
-contains(foo, 7)
-# => False
-
-def next(table, value):
-# find the first row in the table which is > value
+def next(table, value, inclusive):
+# if inclusive=True, find the first row in the table which is >= value
+# if inclusive=False, find the first row in the table which is > value
 # if there is such a row, returns the row
 # otherwise, returns GREATEST
 # only has to work on sorted tables (so you can use binary search if you want)
 
-next(foo, column=1, value=0)
+next(foo, column=1, value=0, inclusive=True)
+# => 0
+
+next(foo, column=1, value=0, inclusive=False)
 # => 6
 
-next(foo, column=1, value=9)
+next(foo, column=1, value=9, inclusive=True)
 # => 13
 
-next(foo, column=1, value=13)
+next(foo, column=1, value=9, inclusive=False)
+# => 13
+
+next(foo, column=1, value=13, inclusive=True)
+# => 13
+
+next(foo, column=1, value=13, inclusive=False)
 # => GREATEST
 ```
 
@@ -124,11 +125,17 @@ def join(tables):
     sort(table)
   value = LEAST
   while True:
-    value = max([next(table, value) for table in tables])
+    nexts = [next(table, value, inclusive=True) for table in tables]
+    value = max(nexts)
     if (value == GREATEST):
       break
-    if all([contains(table, value) for table in tables]):
+    if all([next == value for next in nexts]):
       results.append(value)
+      # get away from this value
+      nexts = [next(table, value, inclusive=False) for table in tables]
+      value = min(nexts)
+      if (value == GREATEST):
+        break
   return results
 ```
 
@@ -281,13 +288,22 @@ users = [("a@a", 0), ("c@c", 2), ("b@b", 3), ("b@b", 4)]
 sort(users)
 # => [("a@a", 0), ("b@b", 3), ("b@b", 4), ("c@c", 2)]
 
-next(users, prevRow=(LEAST, LEAST))
+next(users, prevRow=(LEAST, LEAST), inclusive=True)
 # => ("a@a", 0)
 
-next(users, prevRow=("a@a", 0))
+next(users, prevRow=(LEAST, LEAST), inclusive=False)
+# => ("a@a", 0)
+
+next(users, prevRow=("a@a", 0), inclusive=True)
+# => ("a@a", 0)
+
+next(users, prevRow=("a@a", 0), inclusive=False)
 # => ("b@b", 2)
 
-next(users, prevRow=("c@c", 3))
+next(users, prevRow=("c@c", 2), inclusive=True)
+# => ("c@c", 2)
+
+next(users, prevRow=("c@c", 2), inclusive=False)
 # => (GREATEST, GREATEST)
 ```
 
@@ -365,13 +381,19 @@ def join(numVariables, clauses):
   variables = (LEAST,) * numVariables
   results = []
   while True:
-    nextvariables = [clause.next(variables) for clause in clauses]
-    variables = max(nextvariables) # maximum by compare_colexicographic!
+    nexts = [clause.next(variables, inclusive=True) for clause in clauses]
+    variables = max(nexts) # maximum by compare_colexicographic!
     if variables[0] == GREATEST:
       # no more results
       break
-    if all([clause.search(variables) for clause in clauses]) :
+    if all([next == variables for next in nexts]) :
       results.append(variables.copy())
+      # get away from these variables
+      nexts = [clause.next(variables, inclusive=False) for clause in clauses]
+      variables = min(nexts) # minimum by compare_colexicographic!
+      if variables[0] == GREATEST:
+        # no more results
+        break
 
 users = [("a@a", 0), ("c@c", 2), ("b@b", 3), ("b@b", 4)]
 logins = [(2, "0.0.0.0"), (2, "1.1.1.1"), (4, "1.1.1.1")]
