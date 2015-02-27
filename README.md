@@ -1,7 +1,10 @@
-State of this guide
+TODO
 
-* Basic outline is in place
-* Multi-column join needs cleaning up
+* Change unmap/remap to sensible names
+* Make a reference implementation
+* Query language section
+* Talk about relationship between variable ordering, selectivity, skew etc
+* Feature section
 
 # Make you a database
 
@@ -58,13 +61,13 @@ def sort(table):
 sort(foo)
 # => [0, 6, 13]
 
-def search(table, value):
+def contains(table, value):
 # return true if there is a row in the table with that value
 
-search(foo, 6)
+contains(foo, 6)
 # => True
 
-search(foo, 7)
+contains(foo, 7)
 # => False
 
 def next(table, value):
@@ -83,7 +86,7 @@ next(foo, column=1, value=13)
 # => GREATEST
 ```
 
-## Single-column join
+## Simple joins
 
 We have some number of tables which we want to join together:
 
@@ -103,11 +106,11 @@ def join(tables):
   results = []
   value = LEAST
   while True:
-    if all([search(table, value) for table in tables]):
-      results.append(value)
     value += 1
     if (value == GREATEST):
       break
+    if all([contains(table, value) for table in tables]):
+      results.append(value)
   return results
 ```
 
@@ -120,13 +123,15 @@ def join(tables):
     sort(table)
   value = LEAST
   while True:
-    if all([search(table, value) for table in tables]):
-      results.append(value)
     value = max([next(table, value) for table in tables])
     if (value == GREATEST):
       break
+    if all([contains(table, value) for table in tables]):
+      results.append(value)
   return results
 ```
+
+Note: We could easily combine `contains` and `next` into a single function. I keep them separate here to make the example code clearer.
 
 Later on, when we start handling multiple columns, the number of possible combinations we have to look at will explode and this algorithm will let us skip past huge chunks. Even later on, we will build indexes that keep their contents in sorted order so we don't have to call `sort` for every join.
 
@@ -175,8 +180,11 @@ type value =
   | String of string
   | Greatest
 
-compare (Int 50) (String "a") (* => -1 *)
-compare (String "a") (Int 50) (* => 1 *)
+compare (Int 50) (String "a")
+(* => -1 *)
+
+compare (String "a") (Int 50)
+(* => 1 *)
 ```
 
 Use these comparison functions in the previous join algorithm when sorting, checking equality and finding maximums.
@@ -194,18 +202,31 @@ def compare_colexicographic(row_a, row_b):
     if (comparison == GREATER_THAN) return GREATER_THAN
   return EQUAL
 
-compare_colexicographic((0,0,0),(0,0,0)) # => EQUAL
-compare_colexicographic((0,0,0),(0,0,1)) # => LESS_THAN
-compare_colexicographic((0,0,0),(0,0,-1)) # => GREATER_THAN
-compare_colexicographic((0,0,1),(0,1,0)) # => LESS_THAN
-compare_colexicographic((0,0,-1),(0,-1,0)) # => GREATER_THAN
+compare_colexicographic((0,0,0),(0,0,0))
+# => EQUAL
+
+compare_colexicographic((0,0,0),(0,0,1))
+# => LESS_THAN
+
+compare_colexicographic((0,0,0),(0,0,-1))
+# => GREATER_THAN
+
+compare_colexicographic((0,0,1),(0,1,0))
+# => LESS_THAN
+
+compare_colexicographic((0,0,-1),(0,-1,0))
+# => GREATER_THAN
 ```
 
-# Multiple columns
+# Complex joins
 
-This is where things start to get interesting. We are going to use essentially the same join algorithm as before with a few tweaks to handle complex joins.
+This is where things start to get interesting. We are going to use almost the same join algorithm as before to handle complex queries. Our tables are now arrays of tuples:
 
-We are going to express joins in a slightly awkward way. Say we have the following tables:
+[("ham", 0, 7.5), ("eggs", 1, 92.0), ("chips", 2, 100.01)]
+
+We will assume that there are no duplicate tuples, and worry about how to enforce that later on.
+
+The queries are going to be expressed in a slightly awkward way (later on we will make a query compiler to hide this). Say we have the following tables:
 
 ```
 users(email, id)
@@ -219,7 +240,7 @@ And we want to evaluate this query:
 (users.id = logins.id) && (logins.ip = bans.ip)
 ```
 
-We figure out the number of *unique* columns that will be in the result and assign an slot to each one. We can map them in any order, as long as all the columns that are joined together end up in the same slot.
+We now group together all the columns that were joined, and give each group a number. These are the variables for our query.
 
 ```
 0: user.id, logins.id
@@ -227,7 +248,7 @@ We figure out the number of *unique* columns that will be in the result and assi
 2: users.email
 ```
 
-Now for each table we write down which slots it's columns end up in:
+Now for each table we write down the variable number for each column:
 
 ``` python
  {'users': (2, 0)
@@ -235,9 +256,7 @@ Now for each table we write down which slots it's columns end up in:
   'bans': (1)}
 ```
 
-Later on we will look at how the performance is affected by the order of the slots and the order of the columns in each table, but for now just pick any order.
-
-We need to be able to unmap from the slots back to rows in each table:
+We need to be able to unmap from the variables back to rows in each table:
 
 ``` python
 unmap(("a","b","c"), mapping=(0, 1, 2))
@@ -253,80 +272,67 @@ unmap(("a","b","c"), mapping=(1))
 # => ("b")
 ```
 
-The `next` function now needs to sort and search rows in colexicograpic order, not just by one column:
+Now that we have multiple columns we have to do all our sorting, searching and nexting in colexicographic order.
 
 ``` python
 users = [("a@a", 0), ("c@c", 2), ("b@b", 3), ("b@b", 4)]
 
-users.sort(compare_colexicographic)
+sort(users)
 # => [("a@a", 0), ("b@b", 3), ("b@b", 4), ("c@c", 2)]
 
-next(users, prevRow=(LEAST, LEAST), inclusive=True)
+next(users, prevRow=(LEAST, LEAST))
 # => ("a@a", 0)
 
-next(users, prevRow=("a@a", 0), inclusive=True)
-# => ("a@a", 0)
-
-next(users, prevRow=("a@a", 0), inclusive=False)
+next(users, prevRow=("a@a", 0))
 # => ("b@b", 2)
 
-next(users, prevRow=("a@a", 7), inclusive=True)
-# => ("b@b", 2)
-
-next(users, prevRow=("c@c", 1), inclusive=True)
-# => ("c@c", 2)
-
-next(users, prevRow=("c@c", 3), inclusive=True)
+next(users, prevRow=("c@c", 3))
 # => (GREATEST, GREATEST)
 ```
 
-The join algorithm is going to look at all the possible combinations of values that could go in those slots in colexicographic order, starting with:
+The join algorithm is going to look at all the possible combinations of values that could go in those variables in colexicographic order, starting with:
 
 ``` python
 value = (LEAST, LEAST, LEAST)
 ```
 
-Now for the trick part - we have to be careful when figuring out how far to skip:
+We have to be careful when figuring out how far to skip - it can be pretty tricky:
 
 ``` python
-remap(nextRow=("b@b", 1), slots=("a@a", 0, 0), mapping=[0, 1])
+remap(nextRow=("b@b", 1), variables=("a@a", 0, 0), mapping=[0, 1])
 # => ("b@b", 1, LEAST) -- we set the last column to LEAST because we have skipped on the previous columns
 
-remap(nextRow=("b@b", 1), slots=("a@a", 0, 0), mapping=[0,2])
+remap(nextRow=("b@b", 1), variables=("a@a", 0, 0), mapping=[0,2])
 # => ("b@b", LEAST, LEAST) -- we can't skip on the last column because we skipped on the first and now we don't know the middle one
 
-remap(nextRow=("b@b", 1), slots=("b@b", 0, 0), mapping=[0,2])
+remap(nextRow=("b@b", 1), variables=("b@b", 0, 0), mapping=[0,2])
 # => ("b@b", 0, 1) -- the first value matches, so we leave the middle column alone and only skip on the last
 
-remap(nextRow=("b@b", 1), slots=("b@b", 0, 1), mapping=[0,2])
-# => ("b@b", 0, 1) -- the values all match, so we just leave it alone
-
-remap(nextRow=("b@b", 1), slots=(0, 0, "a@a"), mapping=[2,0])
+remap(nextRow=("b@b", 1), variables=(0, 0, "a@a"), mapping=[2,0])
 # => (0, 0, "b@b") -- we can't skip to (1, 0, "b@b") because we would miss eg ("c@c", 0) so we only skip on the last column
 
-remap(nextRow=("b@b", 1), slots=(0, 0, "b@b"), mapping=[2,0])
-# => ? -- we don't even know what to skip to because we don't know what other rows look like (_, 0)
+remap(nextRow=("b@b", 1), variables=(0, 0, "b@b"), mapping=[2,0])
+# => (0, 0, "b@b") -- we can't skip anything at all because we don't know if there is a ("a@a", 1) in the table
 ```
 
-To make this simpler we will only allow mappings where all the slot numbers are ascending (ie mapping=(0,2) is ok but mapping=(2,0) is forbidden). Then the rule is:
-* Find the first difference between slots and nextRow
-* Set the corresponding slot to the value from nextRow
-* Set all the remaining slots after that slot to LEAST
+To make this simpler we will only allow mappings where all the variable numbers are ascending (ie mapping=(0,2) is ok but mapping=(2,0) is forbidden). Then the rule is:
+
+* Find the first difference between variables and nextRow
+* Set the corresponding variable to the value from nextRow
+* Set all the remaining variables after that variable to LEAST
 
 ``` python
-def remap(nextRow, slots, mapping):
-  slots = slots.copy() # dont modify the original!
+def remap(nextRow, variables, mapping):
+  variables = variables.copy() # dont modify the original!
   for rowIndex in range(len(nextRow)):
-    slotIndex = mapping[rowIndex]
-    if (nextRow[rowIndex] !== slots[slotIndex]):
-      slots[slotIndex] = nextRow[rowIndex]
-      for lesserSlotIndex in range(slotIndex+1, len(slots)):
-        slots[lesserSlotIndex] = LEAST
+    variableIndex = mapping[rowIndex]
+    if (nextRow[rowIndex] !== variables[variableIndex]):
+      variables[variableIndex] = nextRow[rowIndex]
+      for lesservariableIndex in range(variableIndex+1, len(variables)):
+        variables[lesservariableIndex] = LEAST
       break
-  return slots
+  return variables
 ```
-
-TODO test this code :)
 
 We can wrap all of this up:
 
@@ -337,41 +343,39 @@ class RowClause:
     self.mapping = mapping;
 
   def init():
-    self.table.sort(compare_colexicographic)
+    sort(self.table)
 
-  def next(self, slots, inclusive):
-    prevRow = unmap(slots, self.mapping)
-    nextRow = next(table, prevRow, inclusive)
-    return remap(nextRow, slots, self.mapping)
+  def search(self, variables)
+    row = unmap(variables, self.mapping)
+    return search(self.table, row)
+
+  def next(self, variables):
+    prevRow = unmap(variables, self.mapping)
+    nextRow = next(self.table, prevRow)
+    return remap(nextRow, variables, self.mapping)
 ```
 
 And we finally the join algorithm itself is almost exactly the same as the single-column case:
 
 ``` python
-def join(numSlots, clauses):
+def join(numVariables, clauses):
   for clause in clauses:
     clause.init()
-  slots = (LEAST,) * numSlots
+  variables = (LEAST,) * numVariables
   results = []
   while True:
-    nextSlots = [clause.next(slots, inclusive=True) for clause in clauses]
-    slots = max(nextSlots) # maximum by compare_colexicographic!
-    if slots[0] == GREATEST:
+    nextvariables = [clause.next(variables) for clause in clauses]
+    variables = max(nextvariables) # maximum by compare_colexicographic!
+    if variables[0] == GREATEST:
       # no more results
       break
-    if allEqual(nextSlots):
-      results.append(slots.copy())
-      nextSlots = [clause.next(slots, inclusive=False) for clause in clauses]
-      slots = max(nextSlots) # maximum by compare_colexicographic!
-      if slots[0] == GREATEST:
-        # no more results
-        break
-
+    if all([clause.search(variables) for clause in clauses]) :
+      results.append(variables.copy())
 
 users = [("a@a", 0), ("c@c", 2), ("b@b", 3), ("b@b", 4)]
 logins = [(2, "0.0.0.0"), (2, "1.1.1.1"), (4, "1.1.1.1")]
 bans = [("1.1.1.1",), ("2.2.2.2,")]
 join(3, [RowClause(users, (2, 0)), RowClause(logins, (0, 1)), RowClause(bans, (1,))])
-# =>
+# => [(2, "1.1.1.1", "c@c"), (4, "b@b", "1.1.1.1")]
 ```
 
