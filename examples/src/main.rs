@@ -1,6 +1,12 @@
 #![allow(dead_code)]
+#![feature(test)]
+
+extern crate rand;
+extern crate test;
+extern crate time;
 
 use std::rc::Rc;
+use rand::distributions::{IndependentSample, Range};
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Hash, Debug)]
 enum Value {
@@ -168,5 +174,43 @@ fn test_join() {
 	assert_eq!(results, vec![lit_row(&["2", "1.1.1.1", "c@c"]), lit_row(&["4", "1.1.1.1", "b@b"])]);
 }
 
+fn bench_join(bench_size: usize) {
+    let between = Range::new(0, bench_size);
+    let mut rng = rand::thread_rng();
+
+	let mut users = vec![];
+	let mut logins = vec![];
+	let mut bans = vec![];
+
+	for i in (0..bench_size) {
+		users.push(lit_row(&[&format!("user{}", i), &format!("email{}", i)]))
+	}
+
+	for i in (0..bench_size) {
+		let user = between.ind_sample(&mut rng);
+		logins.push(lit_row(&[&format!("user{}", user), &format!("ip{}", i)]));
+	}
+
+	for i in (0..bench_size) {
+		bans.push(lit_row(&[&format!("ip{}", i)]));
+	}
+
+	let start = time::precise_time_s();
+	test::black_box(join(3, vec![
+		RowClause::new(vec![0,2], Table::from_rows(2, users)),
+		RowClause::new(vec![0,1], Table::from_rows(2, logins)),
+		RowClause::new(vec![1], Table::from_rows(1, bans))
+	]));
+	let end = time::precise_time_s();
+	println!("{}s", end - start);
+}
+
 fn main() {
+	bench_join(1_000);
+	// bench_join(1_000);
+	// bench_join(1_000);
+	// bench_join(10_000);
+	// bench_join(10_000);
+	// bench_join(10_000);
+	// bench_join(100_000);
 }
