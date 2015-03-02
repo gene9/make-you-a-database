@@ -381,7 +381,7 @@ def join(numVariables, clauses):
   variables = (LEAST,) * numVariables
   results = []
   while True:
-    nexts = [clause.next(variables, inclusive=True) for clause in clauses]
+    next_variables = [clause.next(variables, inclusive=True) for clause in clauses]
     variables = max(nexts) # maximum by compare_colexicographic!
     if variables[0] == GREATEST:
       # no more results
@@ -395,10 +395,10 @@ def join(numVariables, clauses):
         # no more results
         break
 
-users = [("a@a", 0), ("c@c", 2), ("b@b", 3), ("b@b", 4)]
+users = [(0, "a@a"), (2, "c@c"), (3, "b@b"), (4, "b@b")]
 logins = [(2, "0.0.0.0"), (2, "1.1.1.1"), (4, "1.1.1.1")]
 bans = [("1.1.1.1",), ("2.2.2.2,")]
-join(3, [RowClause(users, (2, 0)), RowClause(logins, (0, 1)), RowClause(bans, (1,))])
+join(3, [RowClause(users, (0, 2)), RowClause(logins, (0, 1)), RowClause(bans, (1,))])
 # => [(2, "1.1.1.1", "c@c"), (4, "b@b", "1.1.1.1")]
 ```
 

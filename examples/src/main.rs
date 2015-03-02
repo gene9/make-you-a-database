@@ -1,13 +1,17 @@
+#![allow(dead_code)]
+
+use std::rc::Rc;
+
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Hash, Debug)]
 enum Value {
 	Least,
-	String(String),
+	String(Rc<String>),
 	Greatest
 }
 
 // TODO make this a macro
 fn lit_value(string: &str) -> Value {
-	Value::String(string.to_string())
+	Value::String(Rc::new(string.to_string()))
 }
 
 type Row = Vec<Value>;
@@ -17,7 +21,9 @@ fn lit_row(row: &[&str]) -> Row {
 	row.iter().map(|value| lit_value(value)).collect()
 }
 
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Hash, Debug)]
 struct Table {
+	num_columns: usize,
 	rows: Vec<Row>
 }
 
@@ -26,6 +32,7 @@ impl Table {
 		rows.sort();
 		rows.push(vec![Value::Greatest; num_columns]);
 		Table {
+			num_columns: num_columns,
 			rows: rows
 		}
 	}
@@ -39,15 +46,11 @@ fn lit_table(rows: &[&[&str]]) -> Table {
 	Table::from_rows(num_columns, rows.iter().map(|row| lit_row(row)).collect())
 }
 
-trait Skippable {
-	fn next(&self, row: &Row, inclusive: bool) -> &Row;
-}
-
-impl Skippable for Table {
+impl Table {
  	fn next(&self, row: &Row, inclusive: bool) -> &Row {
  		let rows = &self.rows;
  		let mut lo = 0; // lo <= target
- 		let mut hi = row.len(); // target < hi
+ 		let mut hi = rows.len(); // target < hi
  		loop {
  			if lo >= hi { break; }
  			let mid = lo + ((hi - lo) / 2);
@@ -81,6 +84,88 @@ fn test_next() {
  	assert_eq!(table.next(&lit_row(&["a", "b", "a"]), false), &vec![Value::Greatest; 3]);
  	assert_eq!(table.next(&lit_row(&["a", "c", "a"]), true), &vec![Value::Greatest; 3]);
  	assert_eq!(table.next(&lit_row(&["a", "c", "a"]), false), &vec![Value::Greatest; 3]);
+}
+
+struct RowClause {
+	mapping: Vec<usize>,
+	table: Table
+}
+
+impl RowClause {
+	fn new (mapping: Vec<usize>, table: Table) -> RowClause {
+	    return RowClause {
+		    mapping: mapping,
+			table: table
+		}
+	}
+}
+
+impl RowClause {
+	fn next(&self, row: &Row, inclusive: bool) -> Row {
+		// TODO do the vec allocations in here matter?
+		let internal = self.mapping.iter().map(|external_ix| row[*external_ix].clone()).collect();
+		let next = self.table.next(&internal, inclusive);
+		let mut external = row.clone();
+		for (next_value, (prev_value, external_ix)) in next.iter().zip(internal.iter().zip(self.mapping.iter())) {
+			if next_value != prev_value {
+			    external[*external_ix] = next_value.clone();
+			    for external_cell in external[(external_ix + 1)..].iter_mut() {
+			    	*external_cell = Value::Least;
+			    }
+				break;
+			}
+		}
+		external
+	}
+}
+
+fn join(num_variables: usize, clauses: Vec<RowClause>) -> Vec<Row> {
+	let mut variables = vec![Value::Least; num_variables];
+	let mut results = vec![];
+	loop {
+			let mut next_variables = clauses.iter().map(|clause| clause.next(&variables, true)).max().unwrap();
+			if next_variables[0] == Value::Greatest {
+				break;
+			}
+			if next_variables == variables {
+				results.push(variables.clone());
+				next_variables = clauses.iter().map(|clause| clause.next(&variables, false)).min().unwrap();
+				if next_variables[0] == Value::Greatest {
+					break;
+				}
+			}
+			variables = next_variables;
+		}
+	results
+}
+
+#[test]
+fn test_join() {
+	let users = lit_table(&[
+		&["0", "a@a"],
+		&["2", "c@c"],
+		&["3", "b@b"],
+		&["4", "b@b"]
+		]);
+
+	let logins = lit_table(&[
+		&["2", "0.0.0.0"],
+		&["2", "1.1.1.1"],
+		&["4", "1.1.1.1"]
+		]);
+
+	let bans = lit_table(&[
+		&["1.1.1.1"],
+		&["2.2.2.2"]
+		]);
+
+	let results = join(3, vec![
+			RowClause::new(vec![0,2], users),
+			RowClause::new(vec![0,1], logins),
+			RowClause::new(vec![1], bans)
+		]);
+
+	assert_eq!(results, vec![lit_row(&["2", "1.1.1.1", "c@c"]), lit_row(&["4", "1.1.1.1", "b@b"])]);
 }
 
 fn main() {
