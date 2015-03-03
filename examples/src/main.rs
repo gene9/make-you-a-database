@@ -5,14 +5,13 @@ extern crate rand;
 extern crate test;
 extern crate time;
 
-use std::rc::Rc;
 use rand::distributions::{IndependentSample, Range};
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Hash, Debug)]
 enum Value {
 	Least,
 	String(String),
-	Greatest
+	Greatest,
 }
 
 // TODO make this a macro
@@ -30,7 +29,7 @@ fn lit_row(row: &[&str]) -> Row {
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Hash, Debug)]
 struct Table {
 	num_columns: usize,
-	rows: Vec<Row>
+	rows: Vec<Row>,
 }
 
 impl Table {
@@ -39,7 +38,7 @@ impl Table {
 		rows.push(vec![Value::Greatest; num_columns]);
 		Table {
 			num_columns: num_columns,
-			rows: rows
+			rows: rows,
 		}
 	}
 }
@@ -78,7 +77,7 @@ fn test_next() {
 	let table = lit_table(&[
 		&["a", "a", "a"],
 		&["a", "b", "a"],
-		&["a", "a", "b"]
+		&["a", "a", "b"],
 		]);
  	assert_eq!(table.next(&lit_row(&["a", "a", "a"]), true), &lit_row(&["a", "a", "a"]));
  	assert_eq!(table.next(&lit_row(&["a", "a", "a"]), false), &lit_row(&["a", "a", "b"]));
@@ -94,14 +93,14 @@ fn test_next() {
 
 struct RowClause {
 	mapping: Vec<usize>,
-	table: Table
+	table: Table,
 }
 
 impl RowClause {
 	fn new (mapping: Vec<usize>, table: Table) -> RowClause {
 	    return RowClause {
 		    mapping: mapping,
-			table: table
+			table: table,
 		}
 	}
 }
@@ -151,24 +150,24 @@ fn test_join() {
 		&["0", "a@a"],
 		&["2", "c@c"],
 		&["3", "b@b"],
-		&["4", "b@b"]
+		&["4", "b@b"],
 		]);
 
 	let logins = lit_table(&[
 		&["2", "0.0.0.0"],
 		&["2", "1.1.1.1"],
-		&["4", "1.1.1.1"]
+		&["4", "1.1.1.1"],
 		]);
 
 	let bans = lit_table(&[
 		&["1.1.1.1"],
-		&["2.2.2.2"]
+		&["2.2.2.2"],
 		]);
 
 	let results = join(3, vec![
 			RowClause::new(vec![0,2], users),
 			RowClause::new(vec![0,1], logins),
-			RowClause::new(vec![1], bans)
+			RowClause::new(vec![1], bans),
 		]);
 
 	assert_eq!(results, vec![lit_row(&["2", "1.1.1.1", "c@c"]), lit_row(&["4", "1.1.1.1", "b@b"])]);
@@ -183,7 +182,7 @@ fn bench_join(bench_size: usize) {
 	let mut bans = vec![];
 
 	for i in (0..bench_size) {
-		users.push(lit_row(&[&format!("user{}", i), &format!("email{}", i)]))
+		users.push(lit_row(&[&format!("user{}", i), &format!("email{}", i)]));
 	}
 
 	for i in (0..bench_size) {
@@ -206,7 +205,7 @@ fn bench_join(bench_size: usize) {
 	test::black_box(join(3, vec![
 		RowClause::new(vec![0,2], users),
 		RowClause::new(vec![0,1], logins),
-		RowClause::new(vec![1], bans)
+		RowClause::new(vec![1], bans),
 	]));
 	let end = time::precise_time_s();
 	println!("solve: {}s", end - start);
