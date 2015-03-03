@@ -11,13 +11,13 @@ use rand::distributions::{IndependentSample, Range};
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Hash, Debug)]
 enum Value {
 	Least,
-	String(Rc<String>),
+	String(String),
 	Greatest
 }
 
 // TODO make this a macro
 fn lit_value(string: &str) -> Value {
-	Value::String(Rc::new(string.to_string()))
+	Value::String(string.to_string())
 }
 
 type Row = Vec<Value>;
