@@ -196,21 +196,22 @@ fn bench_join(bench_size: usize) {
 	}
 
 	let start = time::precise_time_s();
+	let users = Table::from_rows(2, users);
+	let logins = Table::from_rows(2, logins);
+	let bans = Table::from_rows(1, bans);
+	let end = time::precise_time_s();
+	println!("index: {}s", end - start);
+
+	let start = time::precise_time_s();
 	test::black_box(join(3, vec![
-		RowClause::new(vec![0,2], Table::from_rows(2, users)),
-		RowClause::new(vec![0,1], Table::from_rows(2, logins)),
-		RowClause::new(vec![1], Table::from_rows(1, bans))
+		RowClause::new(vec![0,2], users),
+		RowClause::new(vec![0,1], logins),
+		RowClause::new(vec![1], bans)
 	]));
 	let end = time::precise_time_s();
-	println!("{}s", end - start);
+	println!("solve: {}s", end - start);
 }
 
 fn main() {
-	bench_join(1_000);
-	// bench_join(1_000);
-	// bench_join(1_000);
-	// bench_join(10_000);
-	// bench_join(10_000);
-	// bench_join(10_000);
-	// bench_join(100_000);
+	bench_join(1_000_000);
 }
