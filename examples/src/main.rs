@@ -148,7 +148,7 @@ fn join(num_variables: usize, clauses: Vec<RowClause>) -> Vec<Row> {
 }
 
 #[test]
-fn test_join() {
+fn test_banned_users() {
     let users = lit_table(&[
         &["0", "a@a"],
         &["2", "c@c"],
@@ -176,7 +176,65 @@ fn test_join() {
     assert_eq!(results, vec![lit_row(&["2", "1.1.1.1", "c@c"]), lit_row(&["4", "1.1.1.1", "b@b"])]);
 }
 
+#[test]
+fn test_paths0() {
+    let edges = lit_table(&[
+        &["a", "b"],
+        &["b", "c"],
+        &["c", "d"],
+        &["d", "b"],
+        ]);
 
+    let edges_rev = lit_table(&[
+        &["b", "a"],
+        &["c", "b"],
+        &["d", "c"],
+        &["b", "d"],
+        ]);
+
+    let results = join(3, vec![
+            RowClause::new(vec![0,1], edges),
+            RowClause::new(vec![1,2], edges_rev)
+        ]);
+
+    assert_eq!(results, vec![
+            lit_row(&["a", "b", "a"]),
+            lit_row(&["a", "b", "d"]),
+            lit_row(&["b", "c", "b"]),
+            lit_row(&["c", "d", "c"]),
+            lit_row(&["d", "b", "a"]),
+            lit_row(&["d", "b", "d"]),
+        ]);
+}
+
+#[test]
+fn test_paths1() {
+    let edges = lit_table(&[
+        &["a", "b"],
+        &["b", "c"],
+        &["c", "d"],
+        &["d", "b"],
+        ]);
+
+    let edges_rev = lit_table(&[
+        &["b", "a"],
+        &["c", "b"],
+        &["d", "c"],
+        &["b", "d"],
+        ]);
+
+    let results = join(3, vec![
+            RowClause::new(vec![1,2], edges),
+            RowClause::new(vec![0,1], edges_rev)
+    ]);
+
+    assert_eq!(results, vec![
+        lit_row(&["b", "a", "b"]),
+        lit_row(&["b", "d", "b"]),
+        lit_row(&["c", "b", "c"]),
+        lit_row(&["d", "c", "d"]),
+    ]);
+}
 
 fn bench_join(bench_size: usize) {
     let between = Range::new(0, bench_size);
