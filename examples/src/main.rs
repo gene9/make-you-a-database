@@ -111,13 +111,16 @@ impl RowClause {
 		let internal = self.mapping.iter().map(|external_ix| row[*external_ix].clone()).collect();
 		let next = self.table.next(&internal, inclusive);
 		let mut external = row.clone();
+		let mut found_change = false;
 		for (next_value, (prev_value, external_ix)) in next.iter().zip(internal.iter().zip(self.mapping.iter())) {
 			if next_value != prev_value {
 			    external[*external_ix] = next_value.clone();
-			    for external_cell in external[(external_ix + 1)..].iter_mut() {
-			    	*external_cell = Value::Least;
-			    }
-				break;
+			    if !found_change {
+			    	for external_cell in external[(external_ix + 1)..].iter_mut() {
+			    		*external_cell = Value::Least;
+			    	}
+			    	found_change = true;
+				}
 			}
 		}
 		external
