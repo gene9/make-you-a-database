@@ -7,6 +7,8 @@ TODO
 * Talk about relationship between variable ordering, selectivity, skew etc
 * Describe relation to [Tetris algorithm](http://arxiv.org/abs/1404.0703)
 * More features
+* Figure out how to organise optional/branching material
+* Figure out how to version example code for various branches
 
 # Make you a database
 
