@@ -1,11 +1,12 @@
 TODO
 
-* Change unmap/remap to sensible names
-* Add a proof for the join algorithm
-* Make a reference implementation
-* Query language section
+* Switch from pseudocode to real (tested) code?
+* Add a proof for the join algorithm, or at least talk about why it works
+* Basic join optimisations
+* Query compiler
 * Talk about relationship between variable ordering, selectivity, skew etc
-* Feature section
+* Describe relation to [Tetris algorithm](http://arxiv.org/abs/1404.0703)
+* More features
 
 # Make you a database
 
@@ -228,13 +229,7 @@ compare_colexicographic((0,0,-1),(0,-1,0))
 
 # Complex joins
 
-This is where things start to get interesting. We are going to use almost the same join algorithm as before to handle complex queries. Our tables are now arrays of tuples:
-
-[("ham", 0, 7.5), ("eggs", 1, 92.0), ("chips", 2, 100.01)]
-
-We will assume that there are no duplicate tuples, and worry about how to enforce that later on.
-
-The queries are going to be expressed in a slightly awkward way (later on we will make a query compiler to hide this). Say we have the following tables:
+Say we have the following multi-column tables:
 
 ```
 users(email, id)
@@ -248,39 +243,114 @@ And we want to evaluate this query:
 (users.id = logins.id) && (logins.ip = bans.ip)
 ```
 
-We now group together all the columns that were joined, and give each group a number. These are the variables for our query.
-
-```
-0: user.id, logins.id
-1: logins.ip, bans.ip
-2: users.email
-```
-
-Now for each table we write down the variable number for each column:
+This is where things start to get interesting. We are going to use almost exactly the same algorithm as before. The only complication is that our tables are now arrays of tuples like:
 
 ``` python
- {'users': (2, 0)
-  'logins': (0, 1)
-  'bans': (1)}
+users = [
+  (0, "a@a"),
+  (2, "c@c"),
+  (3, "b@b"),
+  (4, "b@b")
+]
+
+logins = [
+  (2, "0.0.0.0"),
+  (2, "1.1.1.1"),
+  (4, "1.1.1.1")
+]
+
+bans = [
+  ("1.1.1.1",),
+  ("2.2.2.2,")
+]
 ```
 
-We need to be able to unmap from the variables back to rows in each table:
+And the results of our query are also arrays of tuples:
 
 ``` python
-unmap(("a","b","c"), mapping=(0, 1, 2))
-# => ("a","b","c")
-
-unmap(("a","b","c"), mapping=(1, 2))
-# => ("b","c")
-
-unmap(("a","b","c"), mapping=(2, 0))
-# => ("c","a")
-
-unmap(("a","b","c"), mapping=(1))
-# => ("b")
+# (user.id, users.email, logins.id, logins.ip, bans.ip, )
+results = [
+  (2, "c@c", 2, "1.1.1.1", "1.1.1.1"),
+  (4, "b@b", 4, "1.1.1.1", "1.1.1.1")
+]
 ```
 
-Now that we have multiple columns we have to do all our sorting, searching and nexting in colexicographic order.
+As you can see, each columns of each table is included in the results. But since our query is `(users.id = logins.id) && (logins.ip = bans.ip)` we know that the `users.id` column and the `logins.id` column will both have the same value in the results, and similarly for the `logins.ip` column and the `bans.ip` column. So we will remove those duplicates:
+
+``` python
+# (user.id/logins.id, users.email, logins.ip/bans.ip)
+results = [
+  (2, "c@c", "1.1.1.1"),
+  (4, "b@b", "1.1.1.1")
+]
+```
+
+For now we can express our query to the join solver by specifying where each column ends up in the output:
+
+``` python
+join(3, # 3 unique columns in the result
+[
+  RowClause(users, (1, 0)), # users[0] => results[1], users[1] => results[0]
+  RowClause(logins, (0, 2)), # users[0] => results[0], users[1] => results[2]
+  RowClause(bans, (2,)) # bans[0] => results[2]
+])
+```
+
+Later we will make a query compiler that lets us write the nice query we had earlier and produces this column mapping for us.
+
+The top level algorithm for join is very similar to the simple one column case. We start at the smallest possible result row `(LEAST, LEAST, LEAST)` and work our way through all the results in order, using `clause.next` to figure out how far ahead we can safely skip:
+
+``` python
+def join(numResultColumns, clauses):
+  result = (LEAST,) * numResultColumns
+  results = []
+  while True:
+    next_result = [clause.next(result, inclusive=True) for clause in clauses]
+    result = max(nexts) # maximum by compare_colexicographic!
+    if result[0] == GREATEST:
+      # no more results
+      break
+    if all([next == result for next in nexts]) :
+      results.append(result)
+      # get away from these result
+      nexts = [clause.next(result, inclusive=False) for clause in clauses]
+      result = min(nexts) # minimum by compare_colexicographic!
+      if result[0] == GREATEST:
+        # no more results
+        break
+```
+
+`clause.next` is where all the magic happens. Let's take a look:
+
+``` python
+class RowClause:
+  def __init__(self, table, mapping):
+    sort(table)
+    self.table = table;
+    self.mapping = mapping;
+
+  def next(self, result, inclusive):
+    prevRow = unmap(result, self.mapping)
+    nextRow = next(self.table, prevRow, inclusive)
+    return remap(nextRow, result, self.mapping)
+```
+
+We have three helper functions, `unmap`, `next` and `remap`.
+
+`unmap` takes a result row and figures out what the corresponding table row is
+
+``` python
+unmap((4, "b@b", "1.1.1.1"), mapping=(1, 0))
+# => ("b@b", 4)
+
+unmap((4, "b@b", "1.1.1.1"), mapping=(0, 2))
+# => (4, "1.1.1.1")
+
+unmap((4, "b@b", "1.1.1.1"), mapping=(2))
+# => ("1.1.1.1",)
+```
+
+`next` works just like the old, single-column version except that it searches through rows using the colexicographic order:
 
 ``` python
 users = [("a@a", 0), ("c@c", 2), ("b@b", 3), ("b@b", 4)]
@@ -307,98 +377,48 @@ next(users, prevRow=("c@c", 2), inclusive=False)
 # => (GREATEST, GREATEST)
 ```
 
-The join algorithm is going to look at all the possible combinations of values that could go in those variables in colexicographic order, starting with:
+`remap` looks at the result of `next` and figures out how far ahead we can skip. This is the only tricky part. Let's take a look at some examples first:
 
 ``` python
-value = (LEAST, LEAST, LEAST)
-```
+remap(nextRow=("b@b", 1), result=("a@a", 0, 0), mapping=[0,1])
+# => ("b@b", 1, LEAST) -- we have to change the last column to LEAST because we can't skip eg ("b@b", 1, -1)
 
-We have to be careful when figuring out how far to skip - it can be pretty tricky:
+remap(nextRow=("b@b", 1), result=("a@a", 0, 0), mapping=[0,2])
+# => ("b@b", LEAST, 1) -- we have to change the middle column to LEAST because we can't skip eg ("b@b", -1, 1)
 
-``` python
-remap(nextRow=("b@b", 1), variables=("a@a", 0, 0), mapping=[0, 1])
-# => ("b@b", 1, LEAST) -- we set the last column to LEAST because we have skipped on the previous columns
+remap(nextRow=("b@b", 1), result=("b@b", 0, 0), mapping=[0,2])
+# => ("b@b", 0, 1) -- the first value matches, so we can the middle column alone and only change the last column
 
-remap(nextRow=("b@b", 1), variables=("a@a", 0, 0), mapping=[0,2])
-# => ("b@b", LEAST, LEAST) -- we can't skip on the last column because we skipped on the first and now we don't know the middle one
+remap(nextRow=("b@b", 1), result=(0, 0, "a@a"), mapping=[2,0])
+# => (0, 0, "b@b") -- we can't skip to (1, 0, "b@b") because we would miss eg (0, 0, "c@c") so we can only change the last column
 
-remap(nextRow=("b@b", 1), variables=("b@b", 0, 0), mapping=[0,2])
-# => ("b@b", 0, 1) -- the first value matches, so we leave the middle column alone and only skip on the last
-
-remap(nextRow=("b@b", 1), variables=(0, 0, "a@a"), mapping=[2,0])
-# => (0, 0, "b@b") -- we can't skip to (1, 0, "b@b") because we would miss eg ("c@c", 0) so we only skip on the last column
-
-remap(nextRow=("b@b", 1), variables=(0, 0, "b@b"), mapping=[2,0])
+remap(nextRow=("b@b", 1), result=(0, 0, "b@b"), mapping=[2,0])
 # => (0, 0, "b@b") -- we can't skip anything at all because we don't know if there is a ("a@a", 1) in the table
 ```
 
-To make this simpler we will only allow mappings where all the variable numbers are ascending (ie `mapping=(0,2)` is ok but `mapping=(2,0)` is forbidden). Then the rule is:
+To make this simpler we will only allow mappings where the column numbers are ascending (ie `mapping=(0,2)` is ok but `mapping=(2,0)` is forbidden). For some queries we might have to change the order of the columns in the input tables to find an allowed mapping - this will be part of the query compilers job later on.
 
-* Find the first difference between variables and nextRow
-* Set the corresponding variable to the value from nextRow
-* Set all the remaining variables after that variable to LEAST
+For ascending mappings the rule is just:
+
+* Find the first column where there is a difference between result and nextRow
+* Set all the remaining columns after that column to LEAST
+* Copy over all the columns from nextRow
+
+You can see that this rule works for the first three examples above and doesn't allow the last two examples.
 
 ``` python
-def remap(nextRow, variables, mapping):
-  variables = variables.copy() # dont modify the original!
-  for rowIndex in range(len(nextRow)):
-    variableIndex = mapping[rowIndex]
-    if (nextRow[rowIndex] !== variables[variableIndex]):
-      variables[variableIndex] = nextRow[rowIndex]
-      for lesservariableIndex in range(variableIndex+1, len(variables)):
-        variables[lesservariableIndex] = LEAST
+def remap(nextRow, result, mapping):
+  result = result.copy() # dont modify the original!
+  for rowColumn in range(len(nextRow)):
+    resultColumn = mapping[rowColumn]
+    if (nextRow[rowColumn] !== result[resultColumn]):
+      for lesserColumn in range(resultColumn+1, len(result)):
+        result[lesserColumn] = LEAST
       break
-  return variables
+  for rowColumn in range(len(nextRow)):
+    resultColumn = mapping[rowColumn]
+    result[resultColumn] = nextRow[rowColumn]
+  return result
 ```
 
-We can wrap all of this up:
-
-``` python
-class RowClause:
-  def __init__(self, table, mapping):
-    self.table = table;
-    self.mapping = mapping;
-
-  def init():
-    sort(self.table)
-
-  def search(self, variables)
-    row = unmap(variables, self.mapping)
-    return search(self.table, row)
-
-  def next(self, variables):
-    prevRow = unmap(variables, self.mapping)
-    nextRow = next(self.table, prevRow)
-    return remap(nextRow, variables, self.mapping)
-```
-
-And we finally the join algorithm itself is almost exactly the same as the single-column case:
-
-``` python
-def join(numVariables, clauses):
-  for clause in clauses:
-    clause.init()
-  variables = (LEAST,) * numVariables
-  results = []
-  while True:
-    next_variables = [clause.next(variables, inclusive=True) for clause in clauses]
-    variables = max(nexts) # maximum by compare_colexicographic!
-    if variables[0] == GREATEST:
-      # no more results
-      break
-    if all([next == variables for next in nexts]) :
-      results.append(variables.copy())
-      # get away from these variables
-      nexts = [clause.next(variables, inclusive=False) for clause in clauses]
-      variables = min(nexts) # minimum by compare_colexicographic!
-      if variables[0] == GREATEST:
-        # no more results
-        break
-
-users = [(0, "a@a"), (2, "c@c"), (3, "b@b"), (4, "b@b")]
-logins = [(2, "0.0.0.0"), (2, "1.1.1.1"), (4, "1.1.1.1")]
-bans = [("1.1.1.1",), ("2.2.2.2,")]
-join(3, [RowClause(users, (0, 2)), RowClause(logins, (0, 1)), RowClause(bans, (1,))])
-# => [(2, "1.1.1.1", "c@c"), (4, "b@b", "1.1.1.1")]
-```
-
+Now we have a join algorithm that can evaluate arbitarily complex join on multi-column tables.
