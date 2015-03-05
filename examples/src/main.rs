@@ -53,22 +53,11 @@ fn lit_table(rows: &[&[&str]]) -> Table {
 
 impl Table {
     fn next(&self, row: &Row, inclusive: bool) -> &Row {
-        let rows = &self.rows;
-        let mut lo = 0; // lo <= target
-        let mut hi = rows.len(); // target < hi
-        loop {
-            if lo >= hi { break; }
-            let mid = lo + ((hi - lo) / 2);
-            if *row <= rows[mid] {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
+        match (self.rows.binary_search(row), inclusive) {
+            (Ok(i), true) => &self.rows[i],
+            (Ok(i), false) => &self.rows[i+1],
+            (Err(i), _) => &self.rows[i],
         }
-        if (*row == rows[lo]) && !inclusive {
-            lo += 1;
-        }
-        &rows[lo]
     }
 }
 
