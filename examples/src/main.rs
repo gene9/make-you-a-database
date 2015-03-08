@@ -52,12 +52,17 @@ fn lit_table(rows: &[&[&str]]) -> Table {
 }
 
 impl Table {
-    fn next(&self, row: &Row, inclusive: bool) -> &Row {
-        match (self.rows.binary_search(row), inclusive) {
-            (Ok(i), true) => &self.rows[i],
-            (Ok(i), false) => &self.rows[i+1],
-            (Err(i), _) => &self.rows[i],
+    fn next(&self, row: &Row, inclusive: bool, hint: &mut usize) -> &Row {
+        match (row == &self.rows[*hint], inclusive) {
+            (true, true) => *hint = *hint,
+            (true, false) => *hint = *hint+1,
+            (false, _) => match (self.rows.binary_search(row), inclusive) {
+                (Ok(i), true) => *hint = i,
+                (Ok(i), false) => *hint = i+1,
+                (Err(i), _) => *hint = i,
+            }
         }
+        &self.rows[*hint]
     }
 }
 
@@ -68,16 +73,16 @@ fn test_next() {
         &["a", "b", "a"],
         &["a", "a", "b"],
         ]);
-    assert_eq!(table.next(&lit_row(&["a", "a", "a"]), true), &lit_row(&["a", "a", "a"]));
-    assert_eq!(table.next(&lit_row(&["a", "a", "a"]), false), &lit_row(&["a", "a", "b"]));
-    assert_eq!(table.next(&lit_row(&["a", "a", "b"]), true), &lit_row(&["a", "a", "b"]));
-    assert_eq!(table.next(&lit_row(&["a", "a", "b"]), false), &lit_row(&["a", "b", "a"]));
-    assert_eq!(table.next(&lit_row(&["a", "a", "c"]), true), &lit_row(&["a", "b", "a"]));
-    assert_eq!(table.next(&lit_row(&["a", "a", "c"]), false), &lit_row(&["a", "b", "a"]));
-    assert_eq!(table.next(&lit_row(&["a", "b", "a"]), true), &lit_row(&["a", "b", "a"]));
-    assert_eq!(table.next(&lit_row(&["a", "b", "a"]), false), &vec![Value::Greatest; 3]);
-    assert_eq!(table.next(&lit_row(&["a", "c", "a"]), true), &vec![Value::Greatest; 3]);
-    assert_eq!(table.next(&lit_row(&["a", "c", "a"]), false), &vec![Value::Greatest; 3]);
+    assert_eq!(table.next(&lit_row(&["a", "a", "a"]), true, &mut 0), &lit_row(&["a", "a", "a"]));
+    assert_eq!(table.next(&lit_row(&["a", "a", "a"]), false, &mut 0), &lit_row(&["a", "a", "b"]));
+    assert_eq!(table.next(&lit_row(&["a", "a", "b"]), true, &mut 0), &lit_row(&["a", "a", "b"]));
+    assert_eq!(table.next(&lit_row(&["a", "a", "b"]), false, &mut 0), &lit_row(&["a", "b", "a"]));
+    assert_eq!(table.next(&lit_row(&["a", "a", "c"]), true, &mut 0), &lit_row(&["a", "b", "a"]));
+    assert_eq!(table.next(&lit_row(&["a", "a", "c"]), false, &mut 0), &lit_row(&["a", "b", "a"]));
+    assert_eq!(table.next(&lit_row(&["a", "b", "a"]), true, &mut 0), &lit_row(&["a", "b", "a"]));
+    assert_eq!(table.next(&lit_row(&["a", "b", "a"]), false, &mut 0), &vec![Value::Greatest; 3]);
+    assert_eq!(table.next(&lit_row(&["a", "c", "a"]), true, &mut 0), &vec![Value::Greatest; 3]);
+    assert_eq!(table.next(&lit_row(&["a", "c", "a"]), false, &mut 0), &vec![Value::Greatest; 3]);
 }
 
 struct RowClause {
@@ -95,10 +100,10 @@ impl RowClause {
 }
 
 impl RowClause {
-    fn next(&self, row: &Row, inclusive: bool) -> Row {
+    fn next(&self, row: &Row, inclusive: bool, hint: &mut usize) -> Row {
         // TODO do the vec allocations in here matter?
         let internal = self.mapping.iter().map(|external_ix| row[*external_ix].clone()).collect();
-        let next = self.table.next(&internal, inclusive);
+        let next = self.table.next(&internal, inclusive, hint);
         let mut external = row.clone();
         let mut found_change = false;
         for (next_value, (prev_value, external_ix)) in next.iter().zip(internal.iter().zip(self.mapping.iter())) {
@@ -118,15 +123,16 @@ impl RowClause {
 
 fn join(num_variables: usize, clauses: Vec<RowClause>) -> Vec<Row> {
     let mut variables = vec![Value::Least; num_variables];
+    let mut hints = vec![0; clauses.len()];
     let mut results = vec![];
     loop {
-            let mut next_variables = clauses.iter().map(|clause| clause.next(&variables, true)).max().unwrap();
+            let mut next_variables = hints.iter_mut().zip(clauses.iter()).map(|(hint, clause)| clause.next(&variables, true, hint)).max().unwrap();
             if next_variables[0] == Value::Greatest {
                 break;
             }
             if next_variables == variables {
                 results.push(variables.clone());
-                next_variables = clauses.iter().map(|clause| clause.next(&variables, false)).min().unwrap();
+                next_variables =  hints.iter_mut().zip(clauses.iter()).map(|(hint, clause)| clause.next(&variables, false, hint)).min().unwrap();
                 if next_variables[0] == Value::Greatest {
                     break;
                 }
