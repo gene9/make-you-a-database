@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![feature(test)]
+#![feature(collections)]
 
 extern crate rand;
 extern crate test;
@@ -121,7 +122,7 @@ impl RowClause {
         for (internal_column, external_column) in self.mapping.iter().enumerate() {
             state.internal_buffer[internal_column] = row[*external_column].clone();
         }
-        let &mut RowClauseState { hint: ref mut hint, .. } = state;
+        let &mut RowClauseState { ref mut hint, .. } = state;
         let next_row = self.table.next(&state.internal_buffer, inclusive, hint);
         let mut changed = false;
         for (external_column, external_value) in row.iter().enumerate() {
@@ -146,13 +147,13 @@ fn join(num_variables: usize, clauses: Vec<RowClause>) -> Vec<Row> {
     while variables[0] != Value::Greatest {
             let changed;
             {
-                let mut next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, true)).max().unwrap();
+                let next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, true)).max().unwrap();
                 changed = *next_variables != variables;
                 variables[..].clone_from_slice(&next_variables[..]);
             }
             if !changed {
                 results.push(variables.clone());
-                let mut next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, false)).min().unwrap();
+                let next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, false)).min().unwrap();
                 variables[..].clone_from_slice(&next_variables[..]);
             }
         }
