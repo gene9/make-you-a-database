@@ -140,24 +140,32 @@ impl RowClause {
     }
 }
 
-fn join(num_variables: usize, clauses: Vec<RowClause>) -> Vec<Row> {
-    let mut variables = vec![Value::Least; num_variables];
-    let mut states: Vec<RowClauseState> = clauses.iter().map(|clause| RowClauseState::new(clause, num_variables)).collect();
-    let mut results = vec![];
-    while variables[0] != Value::Greatest {
+struct Query {
+    num_variables: usize,
+    clauses: Vec<RowClause>,
+}
+
+impl Query {
+    #[inline(never)]
+    fn run(&self) -> Vec<Row> {
+        let mut variables = vec![Value::Least; self.num_variables];
+        let mut states: Vec<RowClauseState> = self.clauses.iter().map(|clause| RowClauseState::new(clause, self.num_variables)).collect();
+        let mut results = vec![];
+        while variables[0] != Value::Greatest {
             let changed;
             {
-                let next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, true)).max().unwrap();
+                let next_variables = states.iter_mut().zip(self.clauses.iter()).map(|(state, clause)| clause.next(state, &variables, true)).max().unwrap();
                 changed = *next_variables != variables;
                 variables[..].clone_from_slice(&next_variables[..]);
             }
             if !changed {
                 results.push(variables.clone());
-                let next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, false)).min().unwrap();
+                let next_variables = states.iter_mut().zip(self.clauses.iter()).map(|(state, clause)| clause.next(state, &variables, false)).min().unwrap();
                 variables[..].clone_from_slice(&next_variables[..]);
             }
         }
-    results
+        results
+    }
 }
 
 #[test]
@@ -277,15 +285,26 @@ fn bench_join(bench_size: usize) {
     let end = time::precise_time_s();
     println!("index: {}s", end - start);
 
+    let query = Query{
+        num_variables: 3,
+        clauses: vec![
+            RowClause::new(vec![0,2], users),
+            RowClause::new(vec![0,1], logins),
+            RowClause::new(vec![1], bans),
+        ],
+    };
+
     let start = time::precise_time_s();
-    let results = join(3, vec![
-        RowClause::new(vec![0,2], users),
-        RowClause::new(vec![0,1], logins),
-        RowClause::new(vec![1], bans),
-    ]);
-    println!("{:?} results", results.len());
+    let results = query.run();
     let end = time::precise_time_s();
     println!("solve: {}s", end - start);
+
+    let start = time::precise_time_s();
+    drop(query);
+    let end = time::precise_time_s();
+    println!("erase: {}s", end - start);
+
+    println!("{:?} results", results.len());
 }
 
 fn main() {
