@@ -6,7 +6,6 @@ extern crate test;
 extern crate time;
 
 use std::rc::Rc;
-use std::cmp::Ordering;
 use rand::distributions::{IndependentSample, Range};
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Hash, Debug)]
@@ -92,54 +91,70 @@ struct RowClause {
     table: Table,
 }
 
+struct RowClauseState {
+    hint: usize,
+    internal_buffer: Row,
+    external_buffer: Row,
+}
+
 impl RowClause {
     fn new (mapping: Vec<usize>, table: Table) -> RowClause {
-        return RowClause {
+        RowClause {
             mapping: mapping,
             table: table,
         }
     }
 }
 
+impl RowClauseState {
+    fn new (clause: &RowClause, num_variables: usize) -> RowClauseState {
+        RowClauseState {
+            hint: 0,
+            internal_buffer: vec![Value::Least; clause.table.num_columns],
+            external_buffer: vec![Value::Least; num_variables],
+        }
+    }
+}
+
 impl RowClause {
-    fn next(& self, row: &Row, inclusive: bool, hint: &mut usize) -> Row {
-        // TODO do the vec allocations in here matter?
-        let internal = &self.mapping.iter().map(|external_ix| row[*external_ix].clone()).collect::<Row>();
-        let next = self.table.next(&internal, inclusive, hint);
-        let mut external = row.clone();
-        let mut found_change = false;
-        for (next_value, (prev_value, external_ix)) in next.iter().zip(internal.iter().zip(self.mapping.iter())) {
-            if next_value != prev_value {
-                external[*external_ix] = next_value.clone();
-                if !found_change {
-                    for external_cell in external[(external_ix + 1)..].iter_mut() {
-                        *external_cell = Value::Least;
-                    }
-                    found_change = true;
-                }
+    fn next<'a>(&'a self, state: &'a mut RowClauseState, row: &Row, inclusive: bool) -> &Row {
+        for (internal_column, external_column) in self.mapping.iter().enumerate() {
+            state.internal_buffer[internal_column] = row[*external_column].clone();
+        }
+        let &mut RowClauseState { hint: ref mut hint, .. } = state;
+        let next_row = self.table.next(&state.internal_buffer, inclusive, hint);
+        let mut changed = false;
+        for (external_column, external_value) in row.iter().enumerate() {
+            match self.mapping.iter().position(|c| *c == external_column) {
+                None =>
+                    state.external_buffer[external_column] = if changed { Value::Least } else { external_value.clone() },
+                Some(internal_column) => {
+                    let internal_value = &next_row[internal_column];
+                    changed = changed || (internal_value != external_value);
+                    state.external_buffer[external_column] = internal_value.clone();
+                },
             }
         }
-        external
+        &state.external_buffer
     }
 }
 
 fn join(num_variables: usize, clauses: Vec<RowClause>) -> Vec<Row> {
     let mut variables = vec![Value::Least; num_variables];
-    let mut hints = vec![0; clauses.len()];
+    let mut states: Vec<RowClauseState> = clauses.iter().map(|clause| RowClauseState::new(clause, num_variables)).collect();
     let mut results = vec![];
-    loop {
-            let mut next_variables = hints.iter_mut().zip(clauses.iter()).map(|(hint, clause)| clause.next(&variables, true, hint)).max().unwrap();
-            if next_variables[0] == Value::Greatest {
-                break;
+    while variables[0] != Value::Greatest {
+            let changed;
+            {
+                let mut next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, true)).max().unwrap();
+                changed = *next_variables != variables;
+                variables[..].clone_from_slice(&next_variables[..]);
             }
-            if next_variables == variables {
-                results.push(variables.iter().map(|v| (*v).clone()).collect());
-                next_variables =  hints.iter_mut().zip(clauses.iter()).map(|(hint, clause)| clause.next(&variables, false, hint)).min().unwrap();
-                if next_variables[0] == Value::Greatest {
-                    break;
-                }
+            if !changed {
+                results.push(variables.clone());
+                let mut next_variables = states.iter_mut().zip(clauses.iter()).map(|(state, clause)| clause.next(state, &variables, false)).min().unwrap();
+                variables[..].clone_from_slice(&next_variables[..]);
             }
-            variables[..].clone_from_slice(&next_variables[..]);
         }
     results
 }
